@@ -93,7 +93,7 @@ class APAGenerator:
 
         p.append(pPr)
 
-        bold_rPr = self._rPr(bold=True)
+        bold_rPr = self._rPr(bold=True, suppress_italic=True)
 
         # --- "Figura " text (bold, with trailing space) ---
         r_text = OxmlElement("w:r")
@@ -217,12 +217,17 @@ class APAGenerator:
     # ------------------------------------------------------------------
     # Run properties
     # ------------------------------------------------------------------
-    def _rPr(self, bold: bool = False, italic: bool = False):
+    def _rPr(self, bold: bool = False, italic: bool = False, suppress_italic: bool = False):
         rPr = OxmlElement("w:rPr")
         if bold:
             rPr.append(OxmlElement("w:b"))
         if italic:
             rPr.append(OxmlElement("w:i"))
+        elif suppress_italic:
+            # Explicitly cancel italic inherited from the Caption paragraph style
+            i_off = OxmlElement("w:i")
+            i_off.set(qn("w:val"), "0")
+            rPr.append(i_off)
         rFonts = OxmlElement("w:rFonts")
         rFonts.set(qn("w:ascii"), self.style.font_name)
         rFonts.set(qn("w:hAnsi"), self.style.font_name)
