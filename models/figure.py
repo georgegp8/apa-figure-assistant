@@ -5,8 +5,8 @@ from dataclasses import dataclass
 class FigureStyle:
     font_name: str = "Times New Roman"
     font_size: int = 12
-    # Points of space inserted after the label and title paragraphs (0 = Word default)
-    space_after_pt: float = 0.0
+    # Word-standard line-spacing multiplier (1.0, 1.15, 1.5, 2.0, 2.5, 3.0)
+    line_spacing: float = 1.0
 
 
 @dataclass

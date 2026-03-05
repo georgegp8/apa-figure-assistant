@@ -226,6 +226,23 @@ class MainWindow(ctk.CTk):
             "Desea agregar un indice de figuras al final del documento?",
             parent=self,
         )
+
+        # --- Ask overwrite or save as new file ---
+        overwrite = messagebox.askyesnocancel(
+            "Guardar documento",
+            "Como desea guardar el documento?\n\n"
+            "Si  → Sobreescribir el archivo original\n"
+            "No  → Guardar como nuevo archivo (sufijo _APA)\n"
+            "Cancelar → No guardar",
+            parent=self,
+        )
+        if overwrite is None:
+            return  # user cancelled
+
+        output_path = (
+            str(self.doc_manager.file_path) if overwrite else None
+        )
+
         try:
             self._set_status("Aplicando formato APA 7...")
             self.update()
@@ -239,7 +256,7 @@ class MainWindow(ctk.CTk):
                     self.doc_manager.document, self.figures
                 )
 
-            out = self.doc_manager.save_document()
+            out = self.doc_manager.save_document(output_path)
             self._set_status(f"Guardado: {Path(out).name}")
             self._mark_done()
             messagebox.showinfo(

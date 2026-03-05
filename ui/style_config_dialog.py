@@ -15,7 +15,9 @@ COMMON_FONTS = [
     "Book Antiqua",
 ]
 FONT_SIZES = ["10", "11", "12", "14", "16", "18"]
-SPACING_OPTIONS = ["0", "3", "6", "9", "12", "18"]
+
+# Match Word's standard "Interlineado" dropdown values
+LINE_SPACING_OPTIONS = ["1.0", "1.15", "1.5", "2.0", "2.5", "3.0"]
 
 
 class StyleConfigDialog(ctk.CTkToplevel):
@@ -25,7 +27,7 @@ class StyleConfigDialog(ctk.CTkToplevel):
         self._style = copy.copy(current_style)
 
         self.title("Configuracion de Estilo")
-        self.geometry("440x360")
+        self.geometry("480x380")
         self.resizable(False, False)
         self.grab_set()
         self.lift()
@@ -59,21 +61,24 @@ class StyleConfigDialog(ctk.CTkToplevel):
         self.size_combo.set(str(self._style.font_size))
         self.size_combo.grid(row=1, column=1, padx=15, pady=10, sticky="w")
 
-        # --- Interlineado / space after ---
-        ctk.CTkLabel(form, text="Espacio entre\nelementos (pt):", anchor="w").grid(
+        # --- Interlineado (Word-standard multipliers) ---
+        ctk.CTkLabel(form, text="Interlineado:", anchor="w").grid(
             row=2, column=0, sticky="w", padx=15, pady=10
         )
         spacing_col = ctk.CTkFrame(form, fg_color="transparent")
         spacing_col.grid(row=2, column=1, padx=15, pady=10, sticky="w")
 
         self.spacing_combo = ctk.CTkComboBox(
-            spacing_col, values=SPACING_OPTIONS, width=100
+            spacing_col, values=LINE_SPACING_OPTIONS, width=100
         )
-        self.spacing_combo.set(str(int(self._style.space_after_pt)))
+        # Show the closest stored value
+        stored = str(self._style.line_spacing)
+        self.spacing_combo.set(stored if stored in LINE_SPACING_OPTIONS else "1.0")
         self.spacing_combo.pack(side="left")
+
         ctk.CTkLabel(
             spacing_col,
-            text="  (espacio despues de 'Figura X' y del titulo)",
+            text="  (se aplica al bloque Figura X / titulo)",
             text_color="gray",
             font=ctk.CTkFont(size=11),
         ).pack(side="left")
@@ -85,6 +90,15 @@ class StyleConfigDialog(ctk.CTkToplevel):
             text_color="gray",
             font=ctk.CTkFont(size=11),
         ).grid(row=3, column=0, columnspan=2, padx=15, pady=(0, 12))
+
+        # --- Caption style tip ---
+        ctk.CTkLabel(
+            form,
+            text="El titulo usa el estilo 'Caption' de Word para que el\nindice de figuras lo reconozca automaticamente.",
+            text_color=("gray40", "gray70"),
+            font=ctk.CTkFont(size=11),
+            justify="left",
+        ).grid(row=4, column=0, columnspan=2, padx=15, pady=(0, 10))
 
         # --- Buttons ---
         btn_frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -105,7 +119,7 @@ class StyleConfigDialog(ctk.CTkToplevel):
         try:
             self._style.font_name = self.font_combo.get()
             self._style.font_size = int(self.size_combo.get())
-            self._style.space_after_pt = float(self.spacing_combo.get())
+            self._style.line_spacing = float(self.spacing_combo.get())
             self.result = self._style
         except ValueError:
             pass

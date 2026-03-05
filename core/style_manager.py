@@ -16,7 +16,10 @@ class StyleManager:
                 return FigureStyle(
                     font_name=data.get("font_name", "Times New Roman"),
                     font_size=int(data.get("font_size", 12)),
-                    space_after_pt=float(data.get("space_after_pt", 0.0)),
+                    # Accept both old key (space_after_pt) and new key (line_spacing)
+                    line_spacing=float(
+                        data.get("line_spacing", data.get("space_after_pt", 1.0))
+                    ),
                 )
         except Exception:
             pass
@@ -30,7 +33,7 @@ class StyleManager:
                     {
                         "font_name": style.font_name,
                         "font_size": style.font_size,
-                        "space_after_pt": style.space_after_pt,
+                        "line_spacing": style.line_spacing,
                     },
                     f,
                     indent=2,
