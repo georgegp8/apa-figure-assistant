@@ -8,8 +8,47 @@ from tkinter import messagebox
 from models.figure import Figure
 
 
+# ---------------------------------------------------------------------------
+class _ImageZoomWindow(ctk.CTkToplevel):
+    """Full-size image viewer opened when the user clicks 'Ver completa'."""
+
+    def __init__(self, parent, image_data: bytes, image_format: str):
+        super().__init__(parent)
+        self.title("Vista completa de imagen")
+        self.geometry("860x680")
+        self.grab_set()
+        self.lift()
+        self._img_ref = None
+
+        self._build(image_data, image_format)
+
+    def _build(self, data: bytes, fmt: str):
+        try:
+            img = Image.open(io.BytesIO(data))
+            # Fit inside the window leaving room for the close button
+            img.thumbnail((820, 580), Image.Resampling.LANCZOS)
+            ctk_img = ctk.CTkImage(
+                light_image=img, dark_image=img, size=(img.width, img.height)
+            )
+            self._img_ref = ctk_img
+            frame = ctk.CTkScrollableFrame(self)
+            frame.pack(fill="both", expand=True, padx=10, pady=(10, 0))
+            ctk.CTkLabel(frame, image=ctk_img, text="").pack()
+        except (UnidentifiedImageError, Exception):
+            ctk.CTkLabel(
+                self,
+                text=f"No se puede previsualizar este formato ({fmt.upper()}).",
+                text_color="gray",
+            ).pack(expand=True)
+
+        ctk.CTkButton(self, text="Cerrar", command=self.destroy, width=110).pack(
+            pady=10
+        )
+
+
+# ---------------------------------------------------------------------------
 class FigureWizard(ctk.CTkToplevel):
-    """Step-by-step wizard for entering title and note for each figure."""
+    """Step-by-step wizard for entering title, note and dimensions per figure."""
 
     def __init__(self, parent, figures: List[Figure], style_config):
         super().__init__(parent)
@@ -20,8 +59,8 @@ class FigureWizard(ctk.CTkToplevel):
         self._img_ref = None  # prevent GC of CTkImage
 
         self.title("Asistente de Figuras APA 7")
-        self.geometry("580x680")
-        self.minsize(500, 580)
+        self.geometry("600x820")
+        self.minsize(520, 700)
         self.grab_set()
         self.lift()
 
@@ -44,23 +83,36 @@ class FigureWizard(ctk.CTkToplevel):
 
         # ---- Progress bar ----
         self.progress_bar = ctk.CTkProgressBar(self)
-        self.progress_bar.pack(fill="x", padx=0, pady=0)
+        self.progress_bar.pack(fill="x")
         self.progress_bar.set(0)
 
         # ---- Scrollable content ----
         content = ctk.CTkScrollableFrame(self)
         content.pack(fill="both", expand=True)
 
-        # Image preview
+        # ---- Image preview ----
         preview = ctk.CTkFrame(content)
         preview.pack(fill="x", padx=15, pady=(15, 8))
 
+        preview_hdr = ctk.CTkFrame(preview, fg_color="transparent")
+        preview_hdr.pack(fill="x", padx=12, pady=(10, 5))
+
         ctk.CTkLabel(
-            preview, text="Vista previa", font=ctk.CTkFont(weight="bold")
-        ).pack(anchor="w", padx=12, pady=(10, 5))
+            preview_hdr, text="Vista previa", font=ctk.CTkFont(weight="bold")
+        ).pack(side="left")
+
+        ctk.CTkButton(
+            preview_hdr,
+            text="Ver imagen completa",
+            command=self._open_zoom,
+            width=160,
+            fg_color="gray40",
+            hover_color="gray30",
+            font=ctk.CTkFont(size=12),
+        ).pack(side="right")
 
         self.img_frame = ctk.CTkFrame(
-            preview, height=220, fg_color=("gray88", "gray20")
+            preview, height=210, fg_color=("gray88", "gray20")
         )
         self.img_frame.pack(fill="x", padx=12, pady=(0, 12))
         self.img_frame.pack_propagate(False)
@@ -70,7 +122,7 @@ class FigureWizard(ctk.CTkToplevel):
         )
         self.img_label.place(relx=0.5, rely=0.5, anchor="center")
 
-        # Title field
+        # ---- Title ----
         title_frame = ctk.CTkFrame(content)
         title_frame.pack(fill="x", padx=15, pady=(0, 8))
 
@@ -82,9 +134,10 @@ class FigureWizard(ctk.CTkToplevel):
 
         ctk.CTkLabel(
             title_frame,
-            text="Se aplicara cursiva automaticamente al generar el documento.",
+            text="Se aplicara cursiva y estilo 'Caption' para que Word lo reconozca en el indice.",
             text_color="gray",
             font=ctk.CTkFont(size=11),
+            wraplength=520,
         ).pack(anchor="w", padx=12, pady=(0, 4))
 
         self.title_entry = ctk.CTkEntry(
@@ -93,7 +146,7 @@ class FigureWizard(ctk.CTkToplevel):
         )
         self.title_entry.pack(fill="x", padx=12, pady=(0, 12))
 
-        # Note section
+        # ---- Note ----
         note_frame = ctk.CTkFrame(content)
         note_frame.pack(fill="x", padx=15, pady=(0, 8))
 
@@ -116,7 +169,50 @@ class FigureWizard(ctk.CTkToplevel):
         self.note_entry = ctk.CTkTextbox(note_frame, height=80, state="disabled")
         self.note_entry.pack(fill="x", padx=12, pady=(0, 12))
 
-        # Validation
+        # ---- Image dimensions ----
+        dim_frame = ctk.CTkFrame(content)
+        dim_frame.pack(fill="x", padx=15, pady=(0, 8))
+
+        ctk.CTkLabel(
+            dim_frame,
+            text="Tamano de imagen (opcional)",
+            font=ctk.CTkFont(weight="bold"),
+        ).pack(anchor="w", padx=12, pady=(12, 4))
+
+        ctk.CTkLabel(
+            dim_frame,
+            text="Dejar en 0 para mantener el tamano original. "
+            "Solo se modifican los ejes con valor > 0.",
+            text_color="gray",
+            font=ctk.CTkFont(size=11),
+            wraplength=520,
+        ).pack(anchor="w", padx=12, pady=(0, 6))
+
+        size_row = ctk.CTkFrame(dim_frame, fg_color="transparent")
+        size_row.pack(fill="x", padx=12, pady=(0, 8))
+
+        ctk.CTkLabel(size_row, text="Ancho (cm):").pack(side="left")
+        self.width_entry = ctk.CTkEntry(
+            size_row, width=75, placeholder_text="0"
+        )
+        self.width_entry.pack(side="left", padx=(6, 20))
+
+        ctk.CTkLabel(size_row, text="Alto (cm):").pack(side="left")
+        self.height_entry = ctk.CTkEntry(
+            size_row, width=75, placeholder_text="0"
+        )
+        self.height_entry.pack(side="left", padx=(6, 0))
+
+        ctk.CTkButton(
+            dim_frame,
+            text="Aplicar estas dimensiones a TODAS las figuras",
+            command=self._apply_size_to_all,
+            fg_color="gray40",
+            hover_color="gray30",
+            width=310,
+        ).pack(padx=12, pady=(0, 12))
+
+        # ---- Validation label ----
         self.warn_label = ctk.CTkLabel(
             content, text="", text_color=("#E07000", "#FFA040")
         )
@@ -150,7 +246,7 @@ class FigureWizard(ctk.CTkToplevel):
     def _show_image(self, data: bytes, fmt: str):
         try:
             img = Image.open(io.BytesIO(data))
-            img.thumbnail((520, 200), Image.Resampling.LANCZOS)
+            img.thumbnail((540, 200), Image.Resampling.LANCZOS)
             ctk_img = ctk.CTkImage(
                 light_image=img, dark_image=img, size=(img.width, img.height)
             )
@@ -160,9 +256,30 @@ class FigureWizard(ctk.CTkToplevel):
             self._img_ref = None
             self.img_label.configure(
                 image=None,
-                text=f"[Vista previa no disponible — formato {fmt.upper()}]",
+                text=f"[Vista previa no disponible — {fmt.upper()}]",
             )
 
+    def _open_zoom(self):
+        fig = self.figures[self.current_index]
+        _ImageZoomWindow(self, fig.image_data, fig.image_format)
+
+    def _apply_size_to_all(self):
+        try:
+            w = float(self.width_entry.get() or 0)
+            h = float(self.height_entry.get() or 0)
+        except ValueError:
+            self.warn_label.configure(
+                text="Ingresa valores numericos validos para ancho/alto."
+            )
+            return
+        for fig in self.figures:
+            fig.image_width_cm = w
+            fig.image_height_cm = h
+        self.warn_label.configure(
+            text=f"Dimensiones {w} x {h} cm aplicadas a {len(self.figures)} figura(s)."
+        )
+
+    # ------------------------------------------------------------------
     def _load(self, index: int):
         fig = self.figures[index]
         total = len(self.figures)
@@ -183,6 +300,15 @@ class FigureWizard(ctk.CTkToplevel):
         if not fig.has_note:
             self.note_entry.configure(state="disabled")
 
+        # Dimensions — show blank instead of "0.0" for cleaner UX
+        self.width_entry.delete(0, "end")
+        if fig.image_width_cm > 0:
+            self.width_entry.insert(0, str(fig.image_width_cm))
+
+        self.height_entry.delete(0, "end")
+        if fig.image_height_cm > 0:
+            self.height_entry.insert(0, str(fig.image_height_cm))
+
         self.prev_btn.configure(state="normal" if index > 0 else "disabled")
         self.next_btn.configure(
             text="Finalizar" if index == total - 1 else "Siguiente >"
@@ -196,6 +322,14 @@ class FigureWizard(ctk.CTkToplevel):
         fig.note = (
             self.note_entry.get("1.0", "end-1c").strip() if fig.has_note else ""
         )
+        try:
+            fig.image_width_cm = float(self.width_entry.get() or 0)
+        except ValueError:
+            fig.image_width_cm = 0.0
+        try:
+            fig.image_height_cm = float(self.height_entry.get() or 0)
+        except ValueError:
+            fig.image_height_cm = 0.0
 
     def _go_prev(self):
         self._save_current()

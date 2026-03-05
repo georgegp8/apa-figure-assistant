@@ -230,7 +230,7 @@ class MainWindow(ctk.CTk):
             self._set_status("Aplicando formato APA 7...")
             self.update()
 
-            gen = APAGenerator(self.style_config)
+            gen = APAGenerator(self.style_config, document=self.doc_manager.document)
             for fig in self.figures:
                 gen.apply_apa_format(fig)
 
