@@ -1,6 +1,5 @@
 from typing import List
 
-from docx.enum.text import WD_BREAK
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Pt
@@ -10,15 +9,19 @@ from models.figure import Figure, FigureStyle
 
 class IndexGenerator:
     """
-    Inserts a Word-native Table of Figures field:
-        { TOC \\h \\z \\c "Figura" }
+    Inserts a Word-native Table of Figures field at the BEGINNING of the document.
 
-    This produces an updatable TOF identical to the one Word generates via
-    Referencias → Insertar tabla de ilustraciones → Rótulo: Figura.
+    Structure inserted (before the original first paragraph):
 
-    After opening the document Word refreshes the field automatically
-    (w:updateFields is set so it triggers on first open).
-    The user can also right-click → "Actualizar campos" at any time.
+        "Indice de Figuras"   ← heading paragraph
+        { TOC \\h \\z \\c "Figura" }  ← TOF field, pre-populated with entries
+        <page break paragraph>  ← separates index from document body
+
+    The TOF is pre-populated so it displays immediately without requiring
+    "Actualizar campos" and WITHOUT triggering the Word security dialog
+    (no w:updateFields in the document settings).
+    Users can still right-click → "Actualizar campos" at any time to refresh
+    page numbers after editing the document.
     """
 
     def __init__(self, style: FigureStyle = None):
@@ -26,81 +29,202 @@ class IndexGenerator:
 
     # ------------------------------------------------------------------
     def generate_index(self, document, figures: List[Figure]):
-        # 1. Page break before the index
-        pb = document.add_paragraph()
-        pb.add_run().add_break(WD_BREAK.PAGE)
+        body = document.element.body
 
-        # 2. Heading "Índice de Figuras"
-        heading = document.add_paragraph()
-        try:
-            heading.style = document.styles["TOC Heading"]
-        except KeyError:
-            pass  # style not in document — plain formatting below is enough
-        run = heading.add_run("Indice de Figuras")
-        run.bold = True
-        run.font.name = self.style.font_name
-        run.font.size = Pt(self.style.font_size + 2)
-        heading.paragraph_format.space_after = Pt(6)
+        # Safeguard: the very first body child to use as insertion anchor
+        original_first = body[0]
 
-        # 3. Paragraph that holds the TOF complex field
-        tof_para = document.add_paragraph()
-        self._insert_tof_field(tof_para._element, label="Figura")
+        # 1. Heading paragraph  ─────────────────────────────────────
+        heading_el = self._make_heading_el(document)
+        original_first.addprevious(heading_el)
 
-        # 4. Tell Word to update all fields on open (covers SEQ numbers + TOF)
-        self._set_update_fields_on_open(document)
+        # 2. TOF field (pre-populated, multi-paragraph) ─────────────
+        #    Insert each paragraph of the field after the heading.
+        tof_paragraphs = self._build_tof_paragraphs(figures)
+        prev = heading_el
+        for p_el in tof_paragraphs:
+            prev.addnext(p_el)
+            prev = p_el
+
+        # 3. Page break — separates index from document body ────────
+        pb_el = self._make_page_break_el()
+        prev.addnext(pb_el)
 
     # ------------------------------------------------------------------
+    # Element builders
+    # ------------------------------------------------------------------
+    def _make_heading_el(self, document):
+        """Heading 'Indice de Figuras' using TOC Heading style if available."""
+        p = OxmlElement("w:p")
+        pPr = OxmlElement("w:pPr")
+
+        style_id = self._toc_heading_style_id(document)
+        if style_id:
+            pStyle = OxmlElement("w:pStyle")
+            pStyle.set(qn("w:val"), style_id)
+            pPr.append(pStyle)
+
+        p.append(pPr)
+
+        r = OxmlElement("w:r")
+        rPr = OxmlElement("w:rPr")
+        b = OxmlElement("w:b")
+        rPr.append(b)
+        rFonts = OxmlElement("w:rFonts")
+        rFonts.set(qn("w:ascii"), self.style.font_name)
+        rFonts.set(qn("w:hAnsi"), self.style.font_name)
+        rPr.append(rFonts)
+        sz = OxmlElement("w:sz")
+        sz.set(qn("w:val"), str((self.style.font_size + 2) * 2))
+        rPr.append(sz)
+        r.append(rPr)
+
+        t = OxmlElement("w:t")
+        t.text = "Indice de Figuras"
+        r.append(t)
+        p.append(r)
+        return p
+
+    def _build_tof_paragraphs(self, figures: List[Figure]) -> list:
+        """
+        Build a multi-paragraph pre-populated TOF field:
+
+            <w:p>  begin + instrText + separate + FIRST ENTRY  </w:p>
+            <w:p>  ENTRY 2  </w:p>
+            ...
+            <w:p>  end  </w:p>
+
+        Each entry shows: "Figura N  Title"
+        Page numbers are omitted (no bookmarks available at generation time).
+        Right-click → Actualizar campos populates them.
+        """
+        if not figures:
+            # Empty field: begin ... separate ... end in one paragraph
+            p = OxmlElement("w:p")
+            self._append_field_begin(p)
+            self._append_field_separate(p)
+            self._append_field_end(p)
+            return [p]
+
+        paragraphs = []
+
+        for idx, fig in enumerate(figures):
+            p = OxmlElement("w:p")
+
+            # Apply TableOfFigures style to entry paragraphs
+            pPr = OxmlElement("w:pPr")
+            pStyle = OxmlElement("w:pStyle")
+            pStyle.set(qn("w:val"), "TableOfFigures")
+            pPr.append(pStyle)
+            p.append(pPr)
+
+            if idx == 0:
+                # First paragraph carries begin + instrText + separate
+                self._append_field_begin(p)
+                self._append_field_separate(p)
+
+            # Entry text: "Figura N  Title"
+            title = fig.title if fig.title else "(sin titulo)"
+            r = OxmlElement("w:r")
+            rPr = self._entry_rPr()
+            r.append(rPr)
+            t = OxmlElement("w:t")
+            t.text = f"Figura {fig.number}"
+            t.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+            r.append(t)
+            p.append(r)
+
+            # Tab separator
+            r_tab = OxmlElement("w:r")
+            r_tab.append(OxmlElement("w:tab"))
+            p.append(r_tab)
+
+            # Title
+            r_title = OxmlElement("w:r")
+            r_title.append(self._entry_rPr())
+            t_title = OxmlElement("w:t")
+            t_title.text = title
+            t_title.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+            r_title.append(t_title)
+            p.append(r_title)
+
+            paragraphs.append(p)
+
+        # Last paragraph carries field end
+        p_end = OxmlElement("w:p")
+        self._append_field_end(p_end)
+        paragraphs.append(p_end)
+
+        return paragraphs
+
     @staticmethod
-    def _insert_tof_field(para_element, label: str):
-        """
-        Insert { TOC \\h \\z \\c "label" } as a complex field.
+    def _make_page_break_el():
+        """Paragraph with a page break to separate the index from the body."""
+        p = OxmlElement("w:p")
+        r = OxmlElement("w:r")
+        rPr = OxmlElement("w:rPr")
+        noProof = OxmlElement("w:noProof")
+        rPr.append(noProof)
+        r.append(rPr)
+        pb = OxmlElement("w:br")
+        pb.set(qn("w:type"), "page")
+        r.append(pb)
+        p.append(r)
+        return p
 
-        \\h  – entries become hyperlinks
-        \\z  – hides tab/page numbers in web view
-        \\c  – collect captions whose SEQ identifier matches <label>
+    # ------------------------------------------------------------------
+    # Field character helpers
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _append_field_begin(para_el):
+        r = OxmlElement("w:r")
+        fc = OxmlElement("w:fldChar")
+        fc.set(qn("w:fldCharType"), "begin")
+        fc.set(qn("w:dirty"), "1")   # marks as stale → user can update page numbers
+        r.append(fc)
+        para_el.append(r)
 
-        dirty="1" forces Word to recalculate the field on open.
-        """
-        # begin
-        r_begin = OxmlElement("w:r")
-        fc_begin = OxmlElement("w:fldChar")
-        fc_begin.set(qn("w:fldCharType"), "begin")
-        fc_begin.set(qn("w:dirty"), "1")
-        r_begin.append(fc_begin)
-        para_element.append(r_begin)
-
-        # instruction
-        r_instr = OxmlElement("w:r")
+        r2 = OxmlElement("w:r")
         instr = OxmlElement("w:instrText")
-        instr.text = f' TOC \\h \\z \\c "{label}" '
+        instr.text = ' TOC \\h \\z \\c "Figura" '
         instr.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
-        r_instr.append(instr)
-        para_element.append(r_instr)
+        r2.append(instr)
+        para_el.append(r2)
 
-        # separate (no cached entries — Word fills them on update)
-        r_sep = OxmlElement("w:r")
-        fc_sep = OxmlElement("w:fldChar")
-        fc_sep.set(qn("w:fldCharType"), "separate")
-        r_sep.append(fc_sep)
-        para_element.append(r_sep)
+    @staticmethod
+    def _append_field_separate(para_el):
+        r = OxmlElement("w:r")
+        fc = OxmlElement("w:fldChar")
+        fc.set(qn("w:fldCharType"), "separate")
+        r.append(fc)
+        para_el.append(r)
 
-        # end
-        r_end = OxmlElement("w:r")
-        fc_end = OxmlElement("w:fldChar")
-        fc_end.set(qn("w:fldCharType"), "end")
-        r_end.append(fc_end)
-        para_element.append(r_end)
+    @staticmethod
+    def _append_field_end(para_el):
+        r = OxmlElement("w:r")
+        fc = OxmlElement("w:fldChar")
+        fc.set(qn("w:fldCharType"), "end")
+        r.append(fc)
+        para_el.append(r)
+
+    # ------------------------------------------------------------------
+    def _entry_rPr(self):
+        rPr = OxmlElement("w:rPr")
+        rFonts = OxmlElement("w:rFonts")
+        rFonts.set(qn("w:ascii"), self.style.font_name)
+        rFonts.set(qn("w:hAnsi"), self.style.font_name)
+        rPr.append(rFonts)
+        sz = OxmlElement("w:sz")
+        sz.set(qn("w:val"), str(self.style.font_size * 2))
+        rPr.append(sz)
+        return rPr
 
     # ------------------------------------------------------------------
     @staticmethod
-    def _set_update_fields_on_open(document):
-        """
-        Add <w:updateFields w:val="1"/> to document settings so Word
-        automatically refreshes all fields (SEQ + TOF) when the file is opened.
-        """
-        settings_el = document.settings.element
-        update_el = settings_el.find(qn("w:updateFields"))
-        if update_el is None:
-            update_el = OxmlElement("w:updateFields")
-            settings_el.insert(0, update_el)
-        update_el.set(qn("w:val"), "1")
+    def _toc_heading_style_id(document) -> str | None:
+        """Find TOC Heading style by XML ID (locale-independent)."""
+        for candidate in ("TOCHeading", "TOC Heading"):
+            for style in document.styles:
+                if style.element.get(qn("w:styleId"), "") == candidate:
+                    return candidate
+        return None

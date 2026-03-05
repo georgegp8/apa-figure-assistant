@@ -223,7 +223,7 @@ class MainWindow(ctk.CTk):
     def _apply_and_save(self):
         include_index = messagebox.askyesno(
             "Indice de figuras",
-            "Desea agregar un indice de figuras al final del documento?",
+            "Desea agregar un indice de figuras al inicio del documento?",
             parent=self,
         )
 
