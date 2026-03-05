@@ -180,7 +180,6 @@ class IndexGenerator:
         r = OxmlElement("w:r")
         fc = OxmlElement("w:fldChar")
         fc.set(qn("w:fldCharType"), "begin")
-        fc.set(qn("w:dirty"), "1")   # marks as stale → user can update page numbers
         r.append(fc)
         para_el.append(r)
 
